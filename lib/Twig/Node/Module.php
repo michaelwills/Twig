@@ -62,23 +62,28 @@ class Twig_Node_Module extends Twig_Node
 
     protected function compileGetParent(Twig_Compiler $compiler)
     {
+        $compiler
+            ->write("protected function doGetParent(array \$context)\n", "{\n")
+            ->indent()
+            ->write("return ")
+        ;
+
         if (null === $this->getNode('parent')) {
-            return;
+            $compiler->raw("false");
+        } else {
+            if ($this->getNode('parent') instanceof Twig_Node_Expression_Constant) {
+                $compiler->subcompile($this->getNode('parent'));
+            } else {
+                $compiler
+                    ->raw("\$this->env->resolveTemplate(")
+                    ->subcompile($this->getNode('parent'))
+                    ->raw(")")
+                ;
+            }
         }
 
         $compiler
-            ->write("public function getParent(array \$context)\n", "{\n")
-            ->indent()
-            ->write("if (null === \$this->parent) {\n")
-            ->indent();
-        ;
-
-        $this->compileLoadTemplate($compiler, $this->getNode('parent'), '$this->parent');
-
-        $compiler
-            ->outdent()
-            ->write("}\n\n")
-            ->write("return \$this->parent;\n")
+            ->raw(";\n")
             ->outdent()
             ->write("}\n\n")
         ;
@@ -86,21 +91,10 @@ class Twig_Node_Module extends Twig_Node
 
     protected function compileDisplayBody(Twig_Compiler $compiler)
     {
-        $compiler->write("\$context = array_merge(\$this->env->getGlobals(), \$context);\n\n");
+        $compiler->subcompile($this->getNode('body'));
 
         if (null !== $this->getNode('parent')) {
-            // remove all output nodes
-            foreach ($this->getNode('body') as $node) {
-                if (!$node instanceof Twig_NodeOutputInterface) {
-                    $compiler->subcompile($node);
-                }
-            }
-
-            $compiler
-                ->write("\$this->getParent(\$context)->display(\$context, array_merge(\$this->blocks, \$blocks));\n")
-            ;
-        } else {
-            $compiler->subcompile($this->getNode('body'));
+            $compiler->write("\$this->getParent(\$context)->display(\$context, array_merge(\$this->blocks, \$blocks));\n");
         }
     }
 
@@ -115,10 +109,6 @@ class Twig_Node_Module extends Twig_Node
             ->write("{\n")
             ->indent()
         ;
-
-        if (null !== $this->getNode('parent')) {
-            $compiler->write("protected \$parent;\n\n");
-        }
     }
 
     protected function compileConstructor(Twig_Compiler $compiler)
@@ -161,17 +151,25 @@ class Twig_Node_Module extends Twig_Node
             }
 
             $compiler
-                ->write("\$this->blocks = array_replace(\n")
+                ->write("\$this->traits = array_merge(\n")
                 ->indent()
             ;
 
             for ($i = 0; $i < $countTraits; $i++) {
                 $compiler
-                    ->write(sprintf("\$_trait_%s_blocks,\n", $i))
+                    ->write(sprintf("\$_trait_%s_blocks".($i == $countTraits - 1 ? '' : ',')."\n", $i))
                 ;
             }
 
             $compiler
+                ->outdent()
+                ->write(");\n\n")
+            ;
+
+            $compiler
+                ->write("\$this->blocks = array_merge(\n")
+                ->indent()
+                ->write("\$this->traits,\n")
                 ->write("array(\n")
             ;
         } else {
@@ -259,11 +257,21 @@ class Twig_Node_Module extends Twig_Node
         // only contains blocks and use statements.
         $traitable = null === $this->getNode('parent') && 0 === count($this->getNode('macros'));
         if ($traitable) {
-            if (!count($nodes = $this->getNode('body'))) {
-                $nodes = new Twig_Node(array($this->getNode('body')));
+            if ($this->getNode('body') instanceof Twig_Node_Body) {
+                $nodes = $this->getNode('body')->getNode(0);
+            } else {
+                $nodes = $this->getNode('body');
+            }
+
+            if (!count($nodes)) {
+                $nodes = new Twig_Node(array($nodes));
             }
 
             foreach ($nodes as $node) {
+                if (!count($node)) {
+                    continue;
+                }
+
                 if ($node instanceof Twig_Node_Text && ctype_space($node->getAttribute('data'))) {
                     continue;
                 }

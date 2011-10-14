@@ -81,7 +81,9 @@ class Twig_Parser implements Twig_ParserInterface
             $body = $this->subparse(null);
 
             if (null !== $this->parent) {
-                $this->checkBodyNodes($body);
+                if (null === $body = $this->filterBodyNodes($body)) {
+                    $body = new Twig_Node();
+                }
             }
         } catch (Twig_Error_Syntax $e) {
             if (null === $e->getTemplateFile()) {
@@ -91,7 +93,7 @@ class Twig_Parser implements Twig_ParserInterface
             throw $e;
         }
 
-        $node = new Twig_Node_Module($body, $this->parent, new Twig_Node($this->blocks), new Twig_Node($this->macros), new Twig_Node($this->traits), $this->stream->getFilename());
+        $node = new Twig_Node_Module(new Twig_Node_Body(array($body)), $this->parent, new Twig_Node($this->blocks), new Twig_Node($this->macros), new Twig_Node($this->traits), $this->stream->getFilename());
 
         $traverser = new Twig_NodeTraverser($this->env, $this->visitors);
 
@@ -138,6 +140,10 @@ class Twig_Parser implements Twig_ParserInterface
 
                     $subparser = $this->handlers->getTokenParser($token->getValue());
                     if (null === $subparser) {
+                        if (null !== $test) {
+                            throw new Twig_Error_Syntax(sprintf('Unexpected tag name "%s" (expecting closing tag for the "%s" tag defined near line %s)', $token->getValue(), $test[0]->getTag(), $lineno), $token->getLine(), $this->stream->getFilename());
+                        }
+
                         throw new Twig_Error_Syntax(sprintf('Unknown tag name "%s"', $token->getValue()), $token->getLine(), $this->stream->getFilename());
                     }
 
@@ -198,7 +204,7 @@ class Twig_Parser implements Twig_ParserInterface
 
     public function setBlock($name, $value)
     {
-        $this->blocks[$name] = $value;
+        $this->blocks[$name] = new Twig_Node_Body(array($value));
     }
 
     public function hasMacro($name)
@@ -228,6 +234,11 @@ class Twig_Parser implements Twig_ParserInterface
         $this->traits[] = $trait;
     }
 
+    public function hasTraits()
+    {
+        return count($this->traits) > 0;
+    }
+
     public function addImportedFunction($alias, $name, Twig_Node_Expression $node)
     {
         $this->importedFunctions[0][$alias] = array('name' => $name, 'node' => $node);
@@ -240,6 +251,11 @@ class Twig_Parser implements Twig_ParserInterface
                 return $functions[$alias];
             }
         }
+    }
+
+    public function isMainScope()
+    {
+        return 1 === count($this->importedFunctions);
     }
 
     public function pushLocalScope()
@@ -292,17 +308,32 @@ class Twig_Parser implements Twig_ParserInterface
         return $this->stream->getCurrent();
     }
 
-    protected function checkBodyNodes($body)
+    protected function filterBodyNodes(Twig_NodeInterface $node)
     {
         // check that the body does not contain non-empty output nodes
-        foreach ($body as $node) {
-            if (
-                ($node instanceof Twig_Node_Text && !ctype_space($node->getAttribute('data')))
-                ||
-                (!$node instanceof Twig_Node_Text && !$node instanceof Twig_Node_BlockReference && $node instanceof Twig_NodeOutputInterface)
-            ) {
-                throw new Twig_Error_Syntax(sprintf('A template that extends another one cannot have a body (%s).', $node), $node->getLine(), $this->stream->getFilename());
+        if (
+            ($node instanceof Twig_Node_Text && !ctype_space($node->getAttribute('data')))
+            ||
+            (!$node instanceof Twig_Node_Text && !$node instanceof Twig_Node_BlockReference && $node instanceof Twig_NodeOutputInterface)
+        ) {
+            throw new Twig_Error_Syntax('A template that extends another one cannot have a body.', $node->getLine(), $this->stream->getFilename());
+        }
+
+        // bypass "set" nodes as they "capture" the output
+        if ($node instanceof Twig_Node_Set) {
+            return $node;
+        }
+
+        if ($node instanceof Twig_NodeOutputInterface) {
+            return;
+        }
+
+        foreach ($node as $k => $n) {
+            if (null !== $n && null === $n = $this->filterBodyNodes($n)) {
+                $node->removeNode($k);
             }
         }
+
+        return $node;
     }
 }

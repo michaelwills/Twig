@@ -10,6 +10,28 @@
  */
 class Twig_Tests_LexerTest extends PHPUnit_Framework_TestCase
 {
+    public function testNameLabelForTag()
+    {
+        $template = '{% ☃ %}';
+
+        $lexer = new Twig_Lexer(new Twig_Environment());
+        $stream = $lexer->tokenize($template);
+
+        $stream->expect(Twig_Token::BLOCK_START_TYPE);
+        $this->assertSame('☃', $stream->expect(Twig_Token::NAME_TYPE)->getValue());
+    }
+
+    public function testNameLabelForFunction()
+    {
+        $template = '{{ ☃() }}';
+
+        $lexer = new Twig_Lexer(new Twig_Environment());
+        $stream = $lexer->tokenize($template);
+
+        $stream->expect(Twig_Token::VAR_START_TYPE);
+        $this->assertSame('☃', $stream->expect(Twig_Token::NAME_TYPE)->getValue());
+    }
+
     public function testBracketsNesting()
     {
         $template = '{{ {"a":{"b":"c"}} }}';
@@ -75,5 +97,45 @@ class Twig_Tests_LexerTest extends PHPUnit_Framework_TestCase
         $this->assertSame(10, $stream->expect(Twig_Token::VAR_START_TYPE)->getLine());
         // baz
         $this->assertSame(11, $stream->expect(Twig_Token::NAME_TYPE)->getLine());
+    }
+
+    public function testLongComments()
+    {
+        $template = '{# '.str_repeat('*', 100000).' #}';
+
+        $lexer = new Twig_Lexer(new Twig_Environment());
+        $lexer->tokenize($template);
+
+        // should not throw an exception
+    }
+
+    public function testLongRaw()
+    {
+        $template = '{% raw %}'.str_repeat('*', 100000).'{% endraw %}';
+
+        $lexer = new Twig_Lexer(new Twig_Environment());
+        $stream = $lexer->tokenize($template);
+
+        // should not throw an exception
+    }
+
+    public function testLongBlock()
+    {
+        $template = '{{ '.str_repeat('*', 100000).' }}';
+
+        $lexer = new Twig_Lexer(new Twig_Environment());
+        $stream = $lexer->tokenize($template);
+
+        // should not throw an exception
+    }
+
+    public function testLongBlock1()
+    {
+        $template = '{% '.str_repeat('*', 100000).' %}';
+
+        $lexer = new Twig_Lexer(new Twig_Environment());
+        $stream = $lexer->tokenize($template);
+
+        // should not throw an exception
     }
 }
